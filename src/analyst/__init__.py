@@ -42,7 +42,19 @@ from analyst.errors import (
     UnsupportedFileTypeError,
 )
 from analyst.gemini import GeminiClient
-from analyst.llm import DEFAULT_MODEL, LLMClient, LLMConfig, load_config
+from analyst.groq import GroqClient
+from analyst.llm import (
+    DEFAULT_GROQ_MODEL,
+    DEFAULT_MODEL,
+    PROVIDERS,
+    LLMClient,
+    LLMConfig,
+    ProviderSettings,
+    create_client,
+    get_provider_settings,
+    load_config,
+    resolve_provider,
+)
 from analyst.loader import load_dataset
 from analyst.profiling import (
     CategoricalStats,
@@ -78,6 +90,7 @@ __all__ = [
     "ColumnProfile",
     "ColumnSummary",
     "Condition",
+    "DEFAULT_GROQ_MODEL",
     "DEFAULT_MODEL",
     "DatasetContext",
     "DatasetError",
@@ -87,6 +100,7 @@ __all__ = [
     "DatetimeColumn",
     "EmptyDatasetError",
     "GeminiClient",
+    "GroqClient",
     "InvalidOperationError",
     "InvalidToolArgumentsError",
     "LLMClient",
@@ -98,6 +112,8 @@ __all__ = [
     "NumericStats",
     "OPERATORS",
     "PERIODS",
+    "PROVIDERS",
+    "ProviderSettings",
     "SUPPORTED_EXTENSIONS",
     "TOOLS",
     "ToolError",
@@ -111,10 +127,12 @@ __all__ = [
     "build_context",
     "correlation",
     "correlation_heatmap",
+    "create_client",
     "describe_numeric",
     "describe_tools",
     "figure_to_png_bytes",
     "filter_rows",
+    "get_provider_settings",
     "get_tool",
     "group_aggregate",
     "group_by_period",
@@ -123,6 +141,7 @@ __all__ = [
     "load_config",
     "load_dataset",
     "profile_dataset",
+    "resolve_provider",
     "run_tool",
     "scatter_plot",
     "sort_rows",

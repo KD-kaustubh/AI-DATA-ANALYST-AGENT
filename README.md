@@ -70,19 +70,24 @@ Chart builders return a Matplotlib `Figure` and write nothing to disk. Available
 
 ### Asking questions
 
-Set `GOOGLE_API_KEY` in a `.env` file (copy `.env.example`), then let a model
-pick the tool while pandas does the arithmetic.
+Copy `.env.example` to `.env` and add a key for either provider, then let a
+model pick the tool while pandas does the arithmetic.
 
 ```python
-from analyst import GeminiClient, answer_question, load_dataset
+from analyst import answer_question, create_client, load_dataset
 
 frame = load_dataset("data/sales.csv")
-answer = answer_question(frame, "Which region earns the most?", GeminiClient())
+answer = answer_question(frame, "Which region earns the most?", create_client())
 
 print(answer.text)       # the reply in plain language
 print(answer.tool)       # which analysis tool ran
 print(answer.evidence)   # the AnalysisResult it was written from
 ```
+
+Gemini and Groq are interchangeable. `create_client()` reads `LLM_PROVIDER`
+when set, otherwise it uses whichever key is configured, preferring Gemini if
+both are. Pass a name to be explicit: `create_client("groq")`. Adding another
+provider means one class plus one entry in `PROVIDER_SETTINGS`.
 
 The model never computes values. It chooses one registered tool and its
 arguments; the dispatcher rejects anything else, runs the real Phase 2

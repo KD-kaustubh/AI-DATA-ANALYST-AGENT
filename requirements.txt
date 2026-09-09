@@ -3,5 +3,6 @@ numpy
 matplotlib
 openpyxl
 google-genai
+groq
 python-dotenv
 pytest
