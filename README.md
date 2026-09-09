@@ -40,16 +40,29 @@ no code execution anywhere in the loop.
 
 ```bash
 python -m venv .venv
-.venv/Scripts/activate          # Windows; use source .venv/bin/activate on Unix
+.venv\Scripts\activate          # Windows; source .venv/bin/activate on Unix
 pip install -r requirements.txt
 cp .env.example .env            # then add your API key
 ```
 
-Run the backend and the UI in two terminals:
+`pip install -r requirements.txt` installs the project itself in editable mode
+(`-e .[dev]`), which is what puts `analyst` on the import path. Without it,
+`uvicorn analyst.api:app` fails with `No module named 'analyst'`.
+
+Run the backend and the UI in two terminals, **each with the virtualenv
+activated** — otherwise `uvicorn` and `streamlit` resolve to a different Python
+that has neither the project nor its dependencies:
 
 ```bash
 uvicorn analyst.api:app --reload     # http://127.0.0.1:8000
 streamlit run app.py                 # http://localhost:8501
+```
+
+If a command still misbehaves, run it through the venv explicitly:
+
+```bash
+.venv\Scripts\python -m uvicorn analyst.api:app --reload
+.venv\Scripts\python -m streamlit run app.py
 ```
 
 Interactive API docs are at `http://127.0.0.1:8000/docs`.

@@ -1,14 +1,8 @@
-pandas
-numpy
-matplotlib
-openpyxl
-google-genai
-groq
-python-dotenv
-fastapi
-uvicorn
-python-multipart
-httpx
-streamlit
-pytest
-httpx2
+# Installs the analyst package itself (editable) plus its dependencies,
+# which are declared in pyproject.toml, and the test-only extras.
+#
+#   pip install -r requirements.txt
+#
+# Installing the package is what puts `analyst` on the import path, so
+# `uvicorn analyst.api:app` works without setting PYTHONPATH.
+-e .[dev]

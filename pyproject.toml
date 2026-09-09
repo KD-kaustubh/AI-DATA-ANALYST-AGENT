@@ -8,6 +8,27 @@ version = "0.1.0"
 description = "An AI-powered data analysis assistant for natural-language interaction with structured datasets."
 readme = "README.md"
 requires-python = ">=3.12"
+dependencies = [
+    "pandas",
+    "numpy",
+    "matplotlib",
+    "openpyxl",
+    "google-genai",
+    "groq",
+    "python-dotenv",
+    "fastapi",
+    "uvicorn",
+    "python-multipart",
+    "httpx",
+    "streamlit",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    # starlette's test client needs httpx2; without it the import warns.
+    "httpx2",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
