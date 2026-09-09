@@ -1,42 +1,177 @@
 # AI Data Analyst Agent
 
-An AI-powered data analysis assistant that allows users to interact with structured datasets using natural language.
+Ask a dataset questions in plain English and get answers backed by real
+computation, not a language model's guess. Upload a CSV or XLSX, and a
+bounded agent picks from a fixed set of pandas operations, runs the one
+that fits, and explains the verified result — with follow-up questions
+handled in a running conversation.
 
-## Status
+**Status:** working end to end — library, HTTP API, web UI, and Docker
+setup all run locally and have been verified through a real provider call.
+342 automated tests, 0 known failures.
 
-🚧 In development. The library, HTTP API and web UI all work locally.
+## The problem this solves
+
+Handing a language model a spreadsheet and asking it to "just answer" a
+numeric question is unreliable — models are fluent, but they are not
+calculators, and they will produce a plausible-sounding wrong number as
+readily as a right one. This project keeps the two jobs separate: the model
+decides *what to compute* by picking from a small, explicit set of tools;
+pandas does the *actual computing*. The model never touches the data
+directly, and a lightweight grounding check flags any figure in its final
+answer that doesn't trace back to a verified result.
+
+## Features
+
+- Upload a CSV or XLSX and get an immediate structured profile (row/column
+  counts, dtypes, missing values, duplicates, detected date columns)
+- Ask questions in natural language; the agent runs one or more of seven
+  deterministic analysis operations to answer them
+- Multi-step reasoning with a hard cap (max 5 tool calls per question), so
+  a confused model can't loop forever
+- Follow-up questions in a running conversation ("...and which one is
+  highest?") using bounded, non-growing history
+- The agent asks for clarification instead of guessing when a question is
+  genuinely ambiguous
+- A grounding check on every answer, flagging any number that doesn't
+  appear in the computed evidence
+- Interchangeable LLM providers (Gemini or Groq) behind one interface —
+  switching is one environment variable
+- A REST API and a Streamlit UI, both containerized, both talking over
+  plain HTTP with no shared process state
 
 ## Architecture
 
 ```
-Streamlit UI  ──HTTP──>  FastAPI  ──>  Agent  ──>  LLM (Gemini / Groq)
-                                        │
-                                        v
-                                 Tool dispatcher
-                                        │
-                                        v
-                                 pandas analysis
-                                        │
-                                        v
-                                verified results
+                     Browser
+                        │
+                        ▼
+                 Streamlit UI  (app.py, :8501)
+                        │  HTTP (api_client.py)
+                        ▼
+                 FastAPI backend  (:8000)
+                        │
+                        ▼
+              Conversation / Agent loop  ──── bounded, max 5 tool calls
+                        │
+           ┌────────────┴────────────┐
+           ▼                         ▼
+      LLM provider              Tool dispatcher
+   (Gemini or Groq,                  │
+    one interface)          only registered tools,
+           │                 only declared arguments
+           ▼                         ▼
+   structured tool request ──> pandas analysis engine
+                                     │
+                                     ▼
+                            verified AnalysisResult
+                                     │
+                        ┌────────────┴────────────┐
+                        ▼                          ▼
+                 grounding check           LLM writes final answer
+                (flags unsupported          (from the verified result
+                 numbers, doesn't            only — never raw data)
+                 invent a "fix")
 ```
 
-The model chooses which analysis to run; **pandas computes every number**. The
-dispatcher only runs registered functions with declared arguments, so there is
-no code execution anywhere in the loop.
+Every arrow from "LLM provider" back down is a **request for a named tool
+with typed arguments**, never code or a query string. The dispatcher looks
+the name up in a fixed registry and rejects anything else — there is no
+`eval`, no `exec`, no dynamic import driven by model output, anywhere in
+this path.
 
 | Layer | Module | Role |
 |---|---|---|
 | Loading | `analyst.loader` | CSV/XLSX in, validated DataFrame out |
 | Profiling | `analyst.profiling` | schema, gaps, duplicates, date detection |
 | Analysis | `analyst.analysis` | seven deterministic pandas operations |
-| Charts | `analyst.charts` | six Matplotlib figures |
-| Agent | `analyst.agent` | bounded multi-step tool loop |
+| Charts | `analyst.charts` | six Matplotlib figures (library only, not yet an agent tool) |
+| Tools | `analyst.tools` | the registry and the safe dispatcher |
+| Agent | `analyst.agent` | the bounded multi-step tool loop |
+| Grounding | `analyst.grounding` | checks the final answer's numbers against evidence |
+| Providers | `analyst.gemini`, `analyst.groq` | one `LLMClient` interface, two implementations |
 | Session | `analyst.conversation` | in-memory follow-up context |
 | API | `analyst.api` | FastAPI over all of the above |
-| UI | `app.py` | Streamlit, talks HTTP only |
+| UI | `app.py` | Streamlit; talks to the API over HTTP only |
 
-## Quick start
+## Tech stack
+
+| Concern | Choice |
+|---|---|
+| Language | Python 3.12 |
+| Data | pandas, numpy |
+| Charts | Matplotlib |
+| LLM providers | Google Gemini (`google-genai`), Groq |
+| API | FastAPI + Uvicorn |
+| UI | Streamlit |
+| Validation | Pydantic |
+| Testing | pytest, FastAPI's `TestClient` |
+| Containers | Docker, Docker Compose |
+| Deployment | Render (Docker-native free web services) |
+
+## Project structure
+
+```
+src/analyst/
+├── loader.py, validation.py, profiling.py   # Phase 1 — dataset foundation
+├── analysis.py, charts.py, conversion.py     # Phase 2 — analysis & viz
+├── tools.py, prompts.py                      # tool registry + prompts
+├── llm.py, gemini.py, groq.py                # provider abstraction
+├── agent.py, conversation.py, grounding.py   # the agent loop
+└── api/                                      # FastAPI app
+    ├── main.py       # routes, error handling, CORS
+    ├── schemas.py     # Pydantic request/response models
+    └── store.py       # in-memory datasets & sessions
+
+app.py            # Streamlit UI
+api_client.py     # the UI's only path to the backend (plain HTTP)
+tests/            # 342 tests, one file per module above
+Dockerfile.api, Dockerfile.ui, docker-compose.yml, render.yaml
+```
+
+## How the agent works
+
+1. The UI (or a direct API call) sends a question plus a dataset id.
+2. The agent builds a compact **schema summary** from the dataset's profile
+   — column names, types, missing counts — never the raw rows.
+3. It asks the LLM for one JSON action: `call_tool` (with a tool name and
+   arguments), `answer` (evidence already suffices, or the dataset genuinely
+   can't answer this), or `clarification` (the question is ambiguous).
+4. A `call_tool` request goes through the dispatcher, which checks the tool
+   is registered and its arguments match the declared types before running
+   the real pandas function. A bad request — unknown tool, wrong argument,
+   a hallucinated column — is fed back to the model as an error, not raised;
+   it gets one more step to correct itself.
+5. Steps 3–4 repeat, up to 5 times, with every prior step (including
+   failures) shown back to the model.
+6. Once the model has enough evidence, a **separate** prompt asks it to
+   write the final answer using only the verified results — the schema and
+   evidence, never the dataset itself.
+7. The answer's numbers are checked against the evidence (`grounding.py`).
+   A mismatch is reported (`grounding.is_grounded: false` and which figures
+   are unsupported), not silently hidden or "corrected".
+
+## Supported analysis tools
+
+`filter_rows`, `sort_rows`, `group_aggregate`, `describe_numeric`,
+`value_counts`, `correlation`, `group_by_period` — see `analyst.tools` for
+the exact arguments each one accepts. All seven are deterministic pandas
+operations; the model can only select from this fixed list.
+
+## LLM provider configuration
+
+Gemini and Groq sit behind one `LLMClient` interface. `create_client()`
+picks a provider: `LLM_PROVIDER` if set, otherwise whichever API key is
+present (Gemini wins if both are). Verified live against:
+
+- **Groq** — `openai/gpt-oss-120b` (the provider used for end-to-end testing)
+- **Gemini** — `gemini-2.5-flash` (unit-tested against a stubbed SDK; not
+  re-verified against the live API in this pass)
+
+Adding a third provider means one class implementing `generate()` plus one
+entry in `PROVIDER_SETTINGS` — no other code changes.
+
+## Local setup
 
 ```bash
 python -m venv .venv
@@ -110,6 +245,35 @@ starting. As outside Docker, everything is in-memory: restarting a
 container clears its datasets and sessions. There is no database, cache, or
 persistent volume.
 
+## Deployment
+
+The project deploys as-is to [Render](https://render.com) using the
+included `render.yaml` Blueprint — two Docker web services, the same
+`Dockerfile.api`/`Dockerfile.ui` used locally, no code changes. Render's
+free web-service tier is Docker-native and needs no CLI.
+
+1. Push this repository to GitHub (it already is).
+2. On Render: **New +** → **Blueprint**, select the repository. Render
+   reads `render.yaml` and creates both services.
+3. Open the `ai-data-analyst-api` service → **Environment**, and set
+   `LLM_PROVIDER` plus one provider key (`GROQ_API_KEY` or
+   `GOOGLE_API_KEY`). These are entered in Render's dashboard, never
+   committed — `render.yaml` marks them `sync: false` for exactly this
+   reason.
+4. Once the API service has deployed, copy its URL (something like
+   `https://ai-data-analyst-api.onrender.com`).
+5. Open the `ai-data-analyst-ui` service → **Environment**, set
+   `ANALYST_API_URL` to that URL, and redeploy.
+
+Both `Dockerfile.api` and `Dockerfile.ui` read a platform-provided `$PORT`
+if one is set (falling back to 8000/8501 for local Docker use), which is
+what Render — and most similar platforms — require.
+
+This is intentionally the simplest deployment that fits: no Kubernetes, no
+Terraform, no CI/CD pipeline, no reverse proxy. Two containers, one env var
+connecting them, matching the architecture used everywhere else in this
+project.
+
 ## Environment variables
 
 | Variable | Required | Purpose |
@@ -121,6 +285,7 @@ persistent volume.
 | `GROQ_MODEL_NAME` | no | Groq model, default `llama-3.3-70b-versatile` |
 | `CORS_ORIGINS` | no | comma-separated origins allowed to call the API |
 | `ANALYST_API_URL` | no | where the UI looks for the backend |
+| `PORT` | no | overrides the container's listen port (set by most deploy platforms) |
 
 Keys are read from the environment or `.env`. `.env` is git-ignored, and no key
 is ever logged, returned by the API, or included in an error message.
@@ -129,7 +294,7 @@ is ever logged, returned by the API, or included in an error message.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/health` | liveness |
+| GET | `/api/health` | liveness, plus the active provider/model |
 | POST | `/api/datasets` | upload a CSV/XLSX, get its profile |
 | GET | `/api/datasets/{id}` | profile of an uploaded dataset |
 | POST | `/api/sessions` | open a conversation over a dataset |
@@ -154,6 +319,18 @@ dataset profile and the verified result rows, never the whole DataFrame.
 
 **Datasets and sessions live in the API process memory and are lost when the
 server restarts.** There is no database and nothing is written to disk.
+
+## Example questions
+
+Tried against a small employee dataset (`id, name, age, department, salary,
+country`) through the actual running stack:
+
+- "What is the average salary?" → one `describe_numeric` call
+- "What is the average salary by department?" → one `group_aggregate` call
+- "Which department has the highest average salary?" → answered as a
+  follow-up, reusing the previous answer's evidence rather than
+  re-running an identical query
+- "How many employees are in each department?" → one `value_counts` call
 
 ## Library usage
 
@@ -188,8 +365,6 @@ group_aggregate(frame, "region", {"revenue": ["sum", "mean"]})
 correlation(frame, ["units", "revenue"])
 ```
 
-Available operations: `filter_rows`, `sort_rows`, `group_aggregate`,
-`describe_numeric`, `value_counts`, `correlation` and `group_by_period`.
 Filters are built from structured `Condition` values, never from expressions,
 so no caller-supplied code is ever evaluated.
 
@@ -208,9 +383,6 @@ Chart builders return a Matplotlib `Figure` and write nothing to disk. Available
 
 ### Asking questions
 
-Copy `.env.example` to `.env` and add a key for either provider, then let a
-model pick the tool while pandas does the arithmetic.
-
 ```python
 from analyst import answer_question, create_client, load_dataset
 
@@ -223,12 +395,6 @@ print(answer.steps)      # every tool call, with its verified result
 print(answer.grounding)  # which figures were traced back to the evidence
 ```
 
-The agent works one step at a time: it picks a tool, sees the verified result,
-and may call another before answering. It runs at most `max_steps` tools
-(default 5) and then stops with `kind="incomplete"`, so a question can never
-loop. A failed step is handed back so the model can fix its arguments; a
-provider outage is raised.
-
 ### Conversations
 
 ```python
@@ -239,31 +405,72 @@ session.ask("What is the average revenue by category?")
 session.ask("Which one is highest?")     # read against the previous turn
 ```
 
-State is in memory only. The model sees the last few turns, and only the
-newest keeps its result rows, so the prompt cannot grow with the conversation.
-When a follow-up is ambiguous the agent returns `kind="clarification"` with a
-question rather than guessing.
-
-Gemini and Groq are interchangeable. `create_client()` reads `LLM_PROVIDER`
-when set, otherwise it uses whichever key is configured, preferring Gemini if
-both are. Pass a name to be explicit: `create_client("groq")`. Adding another
-provider means one class plus one entry in `PROVIDER_SETTINGS`.
-
-The model never computes values. It chooses one registered tool and its
-arguments; the dispatcher rejects anything else, runs the real analysis
-function, and hands the verified result back for wording. There is no code
-execution, and unregistered tools cannot run.
-
-## Development
+## Testing
 
 ```bash
-pytest          # the whole suite; warnings are errors
+pytest          # the whole suite; warnings are treated as errors
 ```
 
-## Limitations
+**342 tests, all passing**, covering every module: dataset loading and
+validation, profiling, the seven analysis operations, all six charts, both
+providers (against stubbed SDKs — no network or API key needed), the tool
+registry and dispatcher, the agent loop, conversation/follow-up behavior,
+grounding, and the full HTTP API (using FastAPI's `TestClient` with a fake
+LLM client, so the suite never makes a live provider call). Edge cases with
+dedicated tests include: empty datasets, invalid/unsupported files,
+malformed LLM JSON, unknown tools, invalid or hallucinated arguments,
+numeric/non-numeric mismatches, provider failures including rate limiting,
+empty LLM responses, the agent's step limit, clarification requests,
+follow-up questions, and conversation reset.
+
+## Security considerations
+
+- **No arbitrary code execution.** The model can only request a tool from
+  an explicit registry, with arguments checked against a declared type and
+  shape before anything runs. There is no `eval`, `exec`, dynamic import,
+  or shell call anywhere in the request-handling path.
+- **Uploads are validated, not trusted.** Extension and size are checked
+  before parsing; the file is written to a generated temporary path
+  (the client's filename is never used as a path) and deleted immediately
+  after parsing, whether parsing succeeded or not.
+- **Errors are sanitized.** Provider failures, tool errors, and unexpected
+  exceptions are all mapped to a fixed, generic message before reaching the
+  client — a raw traceback or provider error body is never returned. A 429
+  from the provider is reported as a friendly rate-limit message, not
+  forwarded verbatim.
+- **Secrets stay out of the build.** Neither Dockerfile ever `COPY`s
+  `.env`; both are excluded via `.dockerignore`. Compose supplies them at
+  container *start*, not build, time. Both containers run as a non-root
+  user.
+- **Known, honest limitation:** there is no authentication. Anyone who can
+  reach a deployed instance can upload a dataset and ask questions against
+  it, and there's no per-user isolation between sessions beyond a random
+  session id. This is appropriate for a portfolio/demo deployment, not for
+  hosting anyone else's real data.
+
+## Design decisions
+
+- **Structured tool calls, never generated code.** Letting a model write
+  and run arbitrary pandas/Python would be far more flexible, and far less
+  safe. A fixed tool registry with typed arguments is a small, auditable
+  surface — the trade-off is deliberate.
+- **Grounding is a check, not a guarantee.** `grounding.py` flags numbers in
+  the final answer that don't appear anywhere in the verified evidence. It
+  catches invented or miscalculated figures; it cannot judge whether the
+  model's wording is a fair reading of the data, and it doesn't block an
+  ungrounded answer — it reports it.
+- **The agent loop is bounded, not agentic-without-limit.** A hard cap (5
+  tool calls) means a confused model degrades to a clear "couldn't finish"
+  result instead of looping or running up cost.
+- **In-memory, not a database.** Datasets and sessions live in process
+  memory. For a single-instance portfolio deployment this is simpler and
+  honest about its own limits, rather than adding persistence the project
+  doesn't otherwise need.
+
+## Current limitations
 
 - Datasets and sessions are in-memory only; restarting the API loses both.
-- No authentication, rate limiting or multi-user isolation. Local use only.
+- No authentication, rate limiting or multi-user isolation. Local/demo use.
 - Uploads are held in memory while parsed, hence the 10 MB cap.
 - The agent runs at most 5 tools per question, then reports `incomplete`.
 - Charts exist as a library (`analyst.charts`) but are not agent tools; the UI
@@ -273,4 +480,11 @@ pytest          # the whole suite; warnings are errors
 - Docker images reuse one dependency list for both services (see
   `Dockerfile.ui`'s comment), so the UI image carries a few packages
   (FastAPI, matplotlib, the provider SDKs) it never imports at runtime.
-- No cloud deployment yet — the Compose stack is for local/single-host use.
+- Deployed on a free tier, the API and UI services will idle-sleep and take
+  a few seconds to wake on the first request after inactivity.
+- Gemini's live API was not re-exercised in this pass (Groq was); Gemini
+  remains covered only by its stubbed-SDK unit tests.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
