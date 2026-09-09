@@ -34,8 +34,10 @@ EXPOSE 8501
 # --server.headless keeps Streamlit from trying to open a browser or wait
 # on the first-run telemetry prompt, either of which would hang the
 # container; --browser.gatherUsageStats disables that telemetry outright.
-CMD ["streamlit", "run", "app.py", \
-     "--server.address=0.0.0.0", \
-     "--server.port=8501", \
-     "--server.headless=true", \
-     "--browser.gatherUsageStats=false"]
+# Shell form so $PORT (injected by most PaaS platforms) is honored, falling
+# back to 8501 for plain `docker run` / docker-compose.
+CMD streamlit run app.py \
+    --server.address=0.0.0.0 \
+    --server.port=${PORT:-8501} \
+    --server.headless=true \
+    --browser.gatherUsageStats=false

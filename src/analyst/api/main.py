@@ -7,10 +7,12 @@ happens here.
 
 from __future__ import annotations
 
+import logging
 import os
 import tempfile
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Callable
+from typing import AsyncIterator, Callable
 
 from fastapi import APIRouter, Depends, FastAPI, File, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -43,6 +45,12 @@ from analyst.llm import LLMClient, create_client, load_config, resolve_provider
 from analyst.loader import load_dataset
 from analyst.validation import SUPPORTED_EXTENSIONS
 
+logger = logging.getLogger("analyst.api")
+# uvicorn configures its own "uvicorn"/"uvicorn.error" loggers but leaves
+# the root logger untouched, so without this our INFO/WARNING records have
+# no handler and are dropped. A no-op if something else already added one.
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
+
 # Uploads are held in memory while they are parsed, so keep them modest.
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
@@ -69,6 +77,22 @@ def create_app(
     would use, without building a client. Tests pass their own factory,
     provider_info and store, so they never depend on the real environment.
     """
+    resolved_provider_info = provider_info or _active_provider
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        # Name and model only — never the key — just to confirm on startup
+        # (in the container/platform logs) which provider is actually live.
+        provider, model = resolved_provider_info()
+        if provider:
+            logger.info("Starting with provider=%s model=%s", provider, model)
+        else:
+            logger.warning(
+                "Starting with no LLM provider configured "
+                "(set GOOGLE_API_KEY or GROQ_API_KEY)."
+            )
+        yield
+
     app = FastAPI(
         title="AI Data Analyst Agent",
         version=__version__,
@@ -76,10 +100,11 @@ def create_app(
             "Ask questions about an uploaded dataset. Every number is "
             "computed by pandas, never by the language model."
         ),
+        lifespan=lifespan,
     )
     app.state.store = store or Store()
     app.state.client_factory = client_factory
-    app.state.provider_info = provider_info or _active_provider
+    app.state.provider_info = resolved_provider_info
 
     app.add_middleware(
         CORSMiddleware,
@@ -276,19 +301,26 @@ def _register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(LLMError)
     def _provider(request: Request, exc: LLMError) -> JSONResponse:
-        # Phase 3 already strips provider detail from these messages.
+        # Phase 3 already strips provider detail from these messages, so
+        # logging the message itself server-side is safe.
         if getattr(exc, "status_code", None) == 429:
+            logger.warning("Provider rate-limited a request: %s", exc)
             return respond(
                 "rate_limited",
                 "The model provider is rate-limiting requests right now. "
                 "Please try again shortly.",
                 status.HTTP_429_TOO_MANY_REQUESTS,
             )
+        logger.warning("Provider request failed: %s", exc)
         return respond("provider_error", str(exc), status.HTTP_502_BAD_GATEWAY)
 
     @app.exception_handler(Exception)
     def _unexpected(request: Request, exc: Exception) -> JSONResponse:
-        # Never let an unplanned exception reach the client as a traceback.
+        # Never let an unplanned exception reach the client as a traceback,
+        # but keep it in the server's own logs so it can be diagnosed.
+        logger.exception(
+            "Unhandled error on %s %s", request.method, request.url.path
+        )
         return respond(
             "internal_error",
             "The analyst failed to handle that request.",
