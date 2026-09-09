@@ -1,0 +1,41 @@
+# Production image for the Streamlit frontend.
+#
+#   docker build -f Dockerfile.ui -t analyst-ui .
+#   docker run -p 8501:8501 -e ANALYST_API_URL=http://api:8000 analyst-ui
+#
+# The UI never talks to a provider or the analysis engine directly — it
+# only ever calls the API over HTTP (see api_client.py) — so no API key
+# needs to reach this image at all.
+
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /app
+
+# Reuses the same pyproject.toml dependency list as Dockerfile.api, so the
+# project keeps one source of truth for its dependencies rather than a
+# second, hand-picked list for the UI.
+COPY pyproject.toml README.md ./
+COPY src ./src
+COPY app.py api_client.py ./
+
+RUN pip install --no-cache-dir .
+
+RUN useradd --create-home --uid 1000 appuser \
+    && chown -R appuser:appuser /app
+USER appuser
+
+EXPOSE 8501
+
+# --server.headless keeps Streamlit from trying to open a browser or wait
+# on the first-run telemetry prompt, either of which would hang the
+# container; --browser.gatherUsageStats disables that telemetry outright.
+CMD ["streamlit", "run", "app.py", \
+     "--server.address=0.0.0.0", \
+     "--server.port=8501", \
+     "--server.headless=true", \
+     "--browser.gatherUsageStats=false"]

@@ -67,6 +67,49 @@ If a command still misbehaves, run it through the venv explicitly:
 
 Interactive API docs are at `http://127.0.0.1:8000/docs`.
 
+## Run with Docker
+
+The same two services run in containers, with no change to their behavior —
+same in-memory state, same `/api/*` routes, same UI.
+
+```bash
+cp .env.example .env      # then add your API key; compose reads this file
+docker compose up --build # build both images and start the stack
+```
+
+- Streamlit: `http://localhost:8501`
+- API: `http://localhost:8000` (published for local debugging; the UI
+  container reaches it internally as `http://api:8000`, the compose service
+  name — never `127.0.0.1` or `localhost`, which would mean "this container")
+- API health: `curl http://localhost:8000/api/health`
+
+Stop everything with:
+
+```bash
+docker compose down
+```
+
+If port 8000 or 8501 is already taken on your machine, override the host
+side only — the containers still talk to each other on their normal ports:
+
+```bash
+API_HOST_PORT=8001 docker compose up --build
+```
+
+**Secrets never enter an image.** `Dockerfile.api` and `Dockerfile.ui` never
+`COPY` `.env` — `.dockerignore` excludes it, and neither Dockerfile
+references it. Compose loads it only at *container start*, via
+`env_file: [{path: .env, required: false}]` on the `api` service, so a
+clean checkout with no `.env` still builds and starts (just unconfigured).
+The `ui` service never receives a key at all — it only ever calls the API
+over HTTP, the same as it does outside Docker.
+
+Both images run as a non-root user, and the API container has a
+Docker-level `healthcheck` against `/api/health` that `ui` waits on before
+starting. As outside Docker, everything is in-memory: restarting a
+container clears its datasets and sessions. There is no database, cache, or
+persistent volume.
+
 ## Environment variables
 
 | Variable | Required | Purpose |
@@ -227,3 +270,7 @@ pytest          # the whole suite; warnings are errors
   draws a bar chart only when a result is one label column plus one measure.
 - Grounding flags figures missing from the evidence but does not block them.
 - Conversation history keeps the last 3 turns; older turns lose their rows.
+- Docker images reuse one dependency list for both services (see
+  `Dockerfile.ui`'s comment), so the UI image carries a few packages
+  (FastAPI, matplotlib, the provider SDKs) it never imports at runtime.
+- No cloud deployment yet — the Compose stack is for local/single-host use.

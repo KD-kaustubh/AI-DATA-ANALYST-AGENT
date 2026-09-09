@@ -1,0 +1,53 @@
+# Local two-service stack: FastAPI backend + Streamlit UI, matching the
+# architecture used outside Docker. No database, cache, or reverse proxy —
+# both services keep their existing in-memory state.
+#
+#   docker compose up --build   # start
+#   docker compose down         # stop
+#
+# API keys come from the host's .env (never baked into either image); a
+# clean checkout with no .env still builds and starts, just unconfigured.
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      # Host port is configurable (defaults to 8000) in case something
+      # else on the host already uses it; the container always listens
+      # on 8000 internally, which is what the ui service talks to.
+      - "${API_HOST_PORT:-8000}:8000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # The browser talks to Streamlit, not the API directly, but CORS is
+      # still set for local tooling (curl, the API's own /docs) hitting it
+      # from the host.
+      CORS_ORIGINS: "http://localhost:8501,http://127.0.0.1:8501"
+    healthcheck:
+      test: [
+        "CMD", "python", "-c",
+        "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=3)"
+      ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.ui
+    ports:
+      - "8501:8501"
+    environment:
+      # The Docker Compose service name, not 127.0.0.1 — "api" resolves on
+      # the compose network to the api container.
+      ANALYST_API_URL: "http://api:8000"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped

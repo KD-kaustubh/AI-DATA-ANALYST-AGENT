@@ -1,0 +1,39 @@
+# Version control
+.git
+.gitignore
+
+# Python virtual environment
+.venv/
+venv/
+env/
+
+# Python bytecode / cache
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+tests/
+
+# Environment / secrets — never baked into an image. Compose supplies
+# real values from the host's .env at container *run* time instead.
+.env
+.env.example
+
+# Local data — datasets reach the app through the API upload endpoint at
+# runtime and are kept in memory; nothing under data/ belongs in the image.
+data/
+
+# Editors / IDEs
+.vscode/
+.idea/
+
+# Misc
+*.log
+.DS_Store
+Thumbs.db
