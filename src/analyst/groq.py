@@ -50,10 +50,14 @@ class GroqClient:
             response = self._client.chat.completions.create(**settings)
         except Exception as exc:
             # Provider errors can carry request details, so report the type
-            # only. The original stays on the traceback for debugging.
+            # and status code only. The original stays on the traceback for
+            # debugging. groq's APIStatusError exposes it as `.status_code`.
+            status_code = _numeric_status(exc, "status_code")
+            prefix = f"{status_code} " if status_code is not None else ""
             raise LLMProviderError(
                 f"The request to model '{self.config.model}' failed "
-                f"({type(exc).__name__})."
+                f"({prefix}{type(exc).__name__}).",
+                status_code=status_code,
             ) from exc
 
         text = _first_message(response)
@@ -70,6 +74,14 @@ def _first_message(response: Any) -> str | None:
     if not choices:
         return None
     return getattr(getattr(choices[0], "message", None), "content", None)
+
+
+def _numeric_status(exc: Exception, attribute: str) -> int | None:
+    """Read an integer status code off an SDK exception, if it has one."""
+    value = getattr(exc, attribute, None)
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    return None
 
 
 def _import_sdk() -> Any:

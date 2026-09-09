@@ -360,6 +360,69 @@ def test_a_provider_failure_is_502_without_provider_detail():
     assert response.json()["code"] == "provider_error"
 
 
+def test_a_non_rate_limit_status_code_still_maps_to_502():
+    class Broken:
+        def generate(self, prompt, *, system=None, json_output=False):
+            raise LLMProviderError(
+                "The request to model 'x' failed (500 InternalServerError).",
+                status_code=500,
+            )
+
+    api, _ = build(factory=Broken)
+    dataset_id = uploaded_id(api)
+
+    response = api.post(
+        "/api/analyze", json={"dataset_id": dataset_id, "question": "Totals?"}
+    )
+
+    assert response.status_code == 502
+    assert response.json()["code"] == "provider_error"
+
+
+def test_a_rate_limited_provider_is_429_not_502():
+    class RateLimited:
+        def generate(self, prompt, *, system=None, json_output=False):
+            raise LLMProviderError(
+                "The request to model 'x' failed (429 ClientError). "
+                "Quota exceeded for metric: generativelanguage.googleapis.com/"
+                "generate_content_free_tier_requests, limit: 5.",
+                status_code=429,
+            )
+
+    api, _ = build(factory=RateLimited)
+    dataset_id = uploaded_id(api)
+
+    response = api.post(
+        "/api/analyze", json={"dataset_id": dataset_id, "question": "Totals?"}
+    )
+
+    assert response.status_code == 429
+    assert response.json()["code"] == "rate_limited"
+
+
+def test_the_rate_limit_response_carries_a_retry_hint_and_no_provider_detail():
+    class RateLimited:
+        def generate(self, prompt, *, system=None, json_output=False):
+            raise LLMProviderError(
+                "429 RESOURCE_EXHAUSTED. generativelanguage.googleapis.com "
+                "quota-metric-detail-xyz",
+                status_code=429,
+            )
+
+    api, _ = build(factory=RateLimited)
+    dataset_id = uploaded_id(api)
+
+    response = api.post(
+        "/api/analyze", json={"dataset_id": dataset_id, "question": "Totals?"}
+    )
+    detail = response.json()["detail"]
+
+    assert "try again" in detail.lower()
+    assert "quota-metric-detail-xyz" not in response.text
+    assert "generativelanguage.googleapis.com" not in response.text
+    assert "RESOURCE_EXHAUSTED" not in response.text
+
+
 def test_a_missing_key_is_503_and_says_nothing_about_keys():
     def unconfigured():
         raise LLMConfigurationError("GOOGLE_API_KEY is not set. Add your key.")

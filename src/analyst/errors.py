@@ -44,6 +44,13 @@ class LLMConfigurationError(LLMError):
 class LLMProviderError(LLMError):
     """The provider rejected the request or could not be reached."""
 
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        # The HTTP status the provider returned, when the SDK exposes one.
+        # Lets a caller (e.g. the API layer) tell a rate limit (429) apart
+        # from a genuine outage without parsing the message text.
+        self.status_code = status_code
+
 
 class LLMResponseError(LLMError):
     """The model replied with something we could not parse."""

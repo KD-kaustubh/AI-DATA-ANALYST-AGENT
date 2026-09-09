@@ -123,6 +123,54 @@ def test_a_provider_failure_does_not_repeat_its_message(install_fake_sdk):
     assert "leaked-value" not in str(raised.value)
 
 
+def test_a_rate_limit_error_carries_its_status_code(install_fake_sdk):
+    # google-genai's ClientError exposes the HTTP status as `.code`.
+    quota_error = type("ClientError", (Exception,), {"code": 429})(
+        "429 RESOURCE_EXHAUSTED. Quota exceeded for metric: ..."
+    )
+    install_fake_sdk(error=quota_error)
+
+    with pytest.raises(LLMProviderError) as raised:
+        GeminiClient(CONFIG).generate("Question?")
+
+    assert raised.value.status_code == 429
+    assert "429 ClientError" in str(raised.value)
+
+
+def test_a_rate_limit_error_does_not_leak_the_quota_message(install_fake_sdk):
+    quota_error = type("ClientError", (Exception,), {"code": 429})(
+        "429 RESOURCE_EXHAUSTED. account-identifying-detail-xyz"
+    )
+    install_fake_sdk(error=quota_error)
+
+    with pytest.raises(LLMProviderError) as raised:
+        GeminiClient(CONFIG).generate("Question?")
+
+    assert "account-identifying-detail-xyz" not in str(raised.value)
+
+
+def test_an_error_without_a_numeric_code_has_no_status_code(install_fake_sdk):
+    install_fake_sdk(error=RuntimeError("connection reset"))
+
+    with pytest.raises(LLMProviderError) as raised:
+        GeminiClient(CONFIG).generate("Question?")
+
+    assert raised.value.status_code is None
+    assert "(RuntimeError)." in str(raised.value)
+
+
+def test_a_non_integer_code_attribute_is_ignored(install_fake_sdk):
+    # Some exceptions use `.code` for something other than an HTTP status.
+    weird_error = type("Weird", (Exception,), {"code": "invalid_argument"})("bad")
+    install_fake_sdk(error=weird_error)
+
+    with pytest.raises(LLMProviderError) as raised:
+        GeminiClient(CONFIG).generate("Question?")
+
+    assert raised.value.status_code is None
+    assert "(Weird)." in str(raised.value)
+
+
 @pytest.mark.parametrize("reply", ["", "   ", None])
 def test_an_empty_reply_is_reported(install_fake_sdk, reply):
     install_fake_sdk(reply=reply)

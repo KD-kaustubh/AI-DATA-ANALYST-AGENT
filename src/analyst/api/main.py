@@ -243,6 +243,13 @@ def _register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(LLMError)
     def _provider(request: Request, exc: LLMError) -> JSONResponse:
         # Phase 3 already strips provider detail from these messages.
+        if getattr(exc, "status_code", None) == 429:
+            return respond(
+                "rate_limited",
+                "The model provider is rate-limiting requests right now. "
+                "Please try again shortly.",
+                status.HTTP_429_TOO_MANY_REQUESTS,
+            )
         return respond("provider_error", str(exc), status.HTTP_502_BAD_GATEWAY)
 
     @app.exception_handler(Exception)

@@ -266,6 +266,43 @@ def test_a_groq_failure_does_not_repeat_its_message(install_fake_groq):
     assert "leaked-value" not in str(raised.value)
 
 
+def test_a_groq_rate_limit_error_carries_its_status_code(install_fake_groq):
+    # groq's APIStatusError (and its RateLimitError subclass) expose the
+    # HTTP status as `.status_code`.
+    quota_error = type("RateLimitError", (Exception,), {"status_code": 429})(
+        "Rate limit reached for requests"
+    )
+    install_fake_groq(error=quota_error)
+
+    with pytest.raises(LLMProviderError) as raised:
+        GroqClient(GROQ_CONFIG).generate("Question?")
+
+    assert raised.value.status_code == 429
+    assert "429 RateLimitError" in str(raised.value)
+
+
+def test_a_groq_rate_limit_error_does_not_leak_its_message(install_fake_groq):
+    quota_error = type("RateLimitError", (Exception,), {"status_code": 429})(
+        "account-identifying-detail-xyz"
+    )
+    install_fake_groq(error=quota_error)
+
+    with pytest.raises(LLMProviderError) as raised:
+        GroqClient(GROQ_CONFIG).generate("Question?")
+
+    assert "account-identifying-detail-xyz" not in str(raised.value)
+
+
+def test_a_groq_error_without_a_status_code_has_none(install_fake_groq):
+    install_fake_groq(error=RuntimeError("connection reset"))
+
+    with pytest.raises(LLMProviderError) as raised:
+        GroqClient(GROQ_CONFIG).generate("Question?")
+
+    assert raised.value.status_code is None
+    assert "(RuntimeError)." in str(raised.value)
+
+
 @pytest.mark.parametrize("reply", ["", "   ", None])
 def test_an_empty_groq_reply_is_reported(install_fake_groq, reply):
     install_fake_groq(reply=reply)

@@ -45,10 +45,14 @@ class GeminiClient:
             )
         except Exception as exc:
             # Provider errors can carry request details, so report the type
-            # only. The original stays on the traceback for debugging.
+            # and status code only. The original stays on the traceback for
+            # debugging. google-genai exposes the HTTP status as `.code`.
+            status_code = _numeric_status(exc, "code")
+            prefix = f"{status_code} " if status_code is not None else ""
             raise LLMProviderError(
                 f"The request to model '{self.config.model}' failed "
-                f"({type(exc).__name__})."
+                f"({prefix}{type(exc).__name__}).",
+                status_code=status_code,
             ) from exc
 
         text = getattr(response, "text", None)
@@ -57,6 +61,14 @@ class GeminiClient:
                 f"Model '{self.config.model}' returned an empty response."
             )
         return text
+
+
+def _numeric_status(exc: Exception, attribute: str) -> int | None:
+    """Read an integer status code off an SDK exception, if it has one."""
+    value = getattr(exc, attribute, None)
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    return None
 
 
 def _import_sdk() -> tuple[Any, Any]:
