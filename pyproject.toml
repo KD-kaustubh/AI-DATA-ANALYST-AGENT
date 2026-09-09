@@ -14,4 +14,14 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
+filterwarnings = [
+    # Our own code must not warn.
+    "error",
+    # Deprecations raised inside starlette's test client and its dependencies.
+    "ignore::DeprecationWarning:starlette.*",
+    "ignore::DeprecationWarning:anyio.*",
+    "ignore:Using `httpx` with `starlette.testclient`:DeprecationWarning",
+    "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning",
+    "ignore::starlette.exceptions.StarletteDeprecationWarning",
+]
