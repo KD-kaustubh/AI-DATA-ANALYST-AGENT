@@ -36,6 +36,38 @@ print(profile.to_dict())  # plain dicts and lists, ready to serialise
 Loading failures raise a subclass of `DatasetError`: `DatasetNotFoundError`,
 `UnsupportedFileTypeError`, `EmptyDatasetError` or `DatasetReadError`.
 
+### Analysis
+
+Analysis operations take a DataFrame and return an `AnalysisResult` holding the
+operation, the columns involved, the parameters used, the resulting rows and
+some metadata. Results are JSON-serialisable and never modify the input frame.
+
+```python
+from analyst import Condition, filter_rows, group_aggregate, correlation
+
+filter_rows(frame, [Condition("region", "==", "North"), Condition("units", ">=", 8)])
+group_aggregate(frame, "region", {"revenue": ["sum", "mean"]})
+correlation(frame, ["units", "revenue"])
+```
+
+Available operations: `filter_rows`, `sort_rows`, `group_aggregate`,
+`describe_numeric`, `value_counts`, `correlation` and `group_by_period`.
+Filters are built from structured `Condition` values, never from expressions,
+so no caller-supplied code is ever evaluated.
+
+### Charts
+
+```python
+from analyst import bar_chart, figure_to_png_bytes
+
+figure = bar_chart(result, "region", "revenue_sum")
+png = figure_to_png_bytes(figure)
+```
+
+Chart builders return a Matplotlib `Figure` and write nothing to disk. Available:
+`bar_chart`, `line_chart`, `histogram`, `scatter_plot`, `box_plot` and
+`correlation_heatmap`.
+
 ## Development
 
 ```bash

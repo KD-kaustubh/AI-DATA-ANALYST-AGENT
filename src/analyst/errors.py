@@ -19,3 +19,15 @@ class EmptyDatasetError(DatasetError):
 
 class DatasetReadError(DatasetError):
     """The file could not be parsed, usually because it is corrupted."""
+
+
+class AnalysisError(Exception):
+    """Base class for analysis and chart failures."""
+
+
+class ColumnNotFoundError(AnalysisError):
+    """A requested column is not in the dataset."""
+
+
+class InvalidOperationError(AnalysisError):
+    """The requested operation does not apply to this data."""

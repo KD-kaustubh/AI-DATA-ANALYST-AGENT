@@ -1,15 +1,19 @@
-"""Checks that run before and after a dataset file is read."""
+"""Checks on dataset files and on the frames and columns we analyse."""
 
 from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any, Sequence
 
 import pandas as pd
+from pandas.api import types as pdtypes
 
 from analyst.errors import (
+    ColumnNotFoundError,
     DatasetNotFoundError,
     EmptyDatasetError,
+    InvalidOperationError,
     UnsupportedFileTypeError,
 )
 
@@ -50,3 +54,28 @@ def validate_frame(frame: pd.DataFrame, source: Path) -> None:
     """
     if frame.columns.empty or frame.empty:
         raise EmptyDatasetError(f"No data rows found in: {source}")
+
+
+def require_columns(frame: pd.DataFrame, columns: Sequence[Any]) -> None:
+    """Raise ColumnNotFoundError if any of `columns` is not in the frame."""
+    missing = [str(name) for name in columns if name not in frame.columns]
+    if missing:
+        available = ", ".join(str(name) for name in frame.columns)
+        raise ColumnNotFoundError(
+            f"Column(s) not found: {', '.join(missing)}. Available: {available}"
+        )
+
+
+def require_numeric(frame: pd.DataFrame, columns: Sequence[Any]) -> None:
+    """Raise InvalidOperationError for columns that are not real numbers.
+
+    Booleans are rejected: they are counted as categorical everywhere else.
+    """
+    wrong = [
+        f"{name} ({frame[name].dtype})"
+        for name in columns
+        if not pdtypes.is_numeric_dtype(frame[name])
+        or pdtypes.is_bool_dtype(frame[name])
+    ]
+    if wrong:
+        raise InvalidOperationError(f"Numeric column(s) required, got: {', '.join(wrong)}")

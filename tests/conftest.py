@@ -44,3 +44,26 @@ def xlsx_file(tmp_path: Path, sample_frame: pd.DataFrame) -> Path:
     path = tmp_path / "sample.xlsx"
     sample_frame.to_excel(path, index=False)
     return path
+
+
+@pytest.fixture
+def analysis_frame() -> pd.DataFrame:
+    """Six sales rows. Revenue is exactly units * 10, so correlation is 1.0."""
+    return pd.DataFrame(
+        {
+            "region": ["North", "South", "North", "West", "South", "North"],
+            "product": ["A", "B", "A", "C", "B", "B"],
+            "units": [10, 5, 8, 12, 7, 3],
+            "revenue": [100.0, 50.0, 80.0, 120.0, 70.0, 30.0],
+            "sold_at": pd.to_datetime(
+                [
+                    "2024-01-15",
+                    "2024-01-20",
+                    "2024-02-10",
+                    "2024-02-28",
+                    "2024-03-05",
+                    "2025-01-02",
+                ]
+            ),
+        }
+    )

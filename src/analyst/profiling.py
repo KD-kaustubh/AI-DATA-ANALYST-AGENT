@@ -10,9 +10,10 @@ import warnings
 from dataclasses import asdict, dataclass
 from typing import Any, Callable
 
-import numpy as np
 import pandas as pd
 from pandas.api import types as pdtypes
+
+from analyst.conversion import to_optional_float, to_python
 
 # Share of non-null values that must parse before a text column is reported
 # as a likely datetime or as a mistyped numeric column.
@@ -157,11 +158,11 @@ def _numeric_stats(series: pd.Series) -> NumericStats:
     return NumericStats(
         name=str(series.name),
         count=int(values.count()),
-        mean=_as_float(values.mean()),
-        std=_as_float(values.std()),
-        minimum=_as_float(values.min()),
-        maximum=_as_float(values.max()),
-        median=_as_float(values.median()),
+        mean=to_optional_float(values.mean()),
+        std=to_optional_float(values.std()),
+        minimum=to_optional_float(values.min()),
+        maximum=to_optional_float(values.max()),
+        median=to_optional_float(values.median()),
     )
 
 
@@ -177,7 +178,7 @@ def _categorical_stats(series: pd.Series) -> CategoricalStats:
     return CategoricalStats(
         name=str(series.name),
         unique_count=int(series.nunique(dropna=True)),
-        most_frequent=_as_python(counts.index[0]),
+        most_frequent=to_python(counts.index[0]),
         most_frequent_count=int(counts.iloc[0]),
     )
 
@@ -276,21 +277,3 @@ def _collect_warnings(
         f"Column {name!r} is stored as text but looks numeric." for name in numeric_like
     )
     return messages
-
-
-def _as_float(value: Any) -> float | None:
-    """Convert a numpy or pandas number to a float, mapping NaN to None."""
-    if value is None or pd.isna(value):
-        return None
-    return float(value)
-
-
-def _as_python(value: Any) -> Any:
-    """Convert a numpy or pandas scalar to a plain Python value."""
-    if value is None or (not isinstance(value, str) and pd.isna(value)):
-        return None
-    if isinstance(value, pd.Timestamp):
-        return value.isoformat()
-    if isinstance(value, np.generic):
-        return value.item()
-    return value
