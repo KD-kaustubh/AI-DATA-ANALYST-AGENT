@@ -33,6 +33,7 @@ def main() -> None:
 
     _init_state()
     api = AnalystApi(st.session_state.api_url)
+    _provider_caption(api)
 
     with st.sidebar:
         _sidebar(api)
@@ -44,6 +45,26 @@ def main() -> None:
     _dataset_panel(st.session_state.dataset)
     st.divider()
     _conversation_panel(api)
+
+
+def _provider_caption(api: AnalystApi) -> None:
+    """Show which LLM provider and model are currently active.
+
+    Read from the backend's health check on every render, so it always
+    reflects the server's actual configuration (LLM_PROVIDER, MODEL_NAME,
+    GROQ_MODEL_NAME) rather than anything guessed or hardcoded here. Never
+    shows a key or other credential.
+    """
+    try:
+        info = api.health()
+    except ApiError:
+        return  # Backend connectivity is already surfaced by other calls.
+
+    provider, model = info.get("provider"), info.get("model")
+    if provider and model:
+        st.caption(f"🤖 AI Model: {provider.title()} · {model}")
+    else:
+        st.caption("🤖 AI Model: not configured")
 
 
 def _init_state() -> None:

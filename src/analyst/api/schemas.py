@@ -18,10 +18,16 @@ MAX_QUESTION_LENGTH = 1000
 
 
 class HealthResponse(BaseModel):
-    """Liveness check."""
+    """Liveness check.
+
+    `provider` and `model` reflect the active configuration and are None
+    when no provider is configured. Never a key or other credential.
+    """
 
     status: str
     version: str
+    provider: str | None = None
+    model: str | None = None
 
 
 class ColumnInfo(BaseModel):

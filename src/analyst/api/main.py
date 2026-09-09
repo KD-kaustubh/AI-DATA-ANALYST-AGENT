@@ -39,7 +39,7 @@ from analyst.errors import (
     LLMError,
     ToolError,
 )
-from analyst.llm import LLMClient, create_client
+from analyst.llm import LLMClient, create_client, load_config, resolve_provider
 from analyst.loader import load_dataset
 from analyst.validation import SUPPORTED_EXTENSIONS
 
@@ -50,11 +50,13 @@ MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 DEFAULT_ORIGINS = ("http://localhost:8501", "http://127.0.0.1:8501")
 
 ClientFactory = Callable[[], LLMClient]
+ProviderInfo = Callable[[], "tuple[str | None, str | None]"]
 
 
 def create_app(
     *,
     client_factory: ClientFactory = create_client,
+    provider_info: ProviderInfo | None = None,
     store: Store | None = None,
     allowed_origins: list[str] | None = None,
 ) -> FastAPI:
@@ -62,7 +64,10 @@ def create_app(
 
     `client_factory` is called only when a question is asked, so the API
     imports and serves health checks without any provider key configured.
-    Tests pass their own factory and store.
+    `provider_info` reports the configured provider and model for the health
+    endpoint; it defaults to reading the same environment `client_factory`
+    would use, without building a client. Tests pass their own factory,
+    provider_info and store, so they never depend on the real environment.
     """
     app = FastAPI(
         title="AI Data Analyst Agent",
@@ -74,6 +79,7 @@ def create_app(
     )
     app.state.store = store or Store()
     app.state.client_factory = client_factory
+    app.state.provider_info = provider_info or _active_provider
 
     app.add_middleware(
         CORSMiddleware,
@@ -92,6 +98,10 @@ def get_store(request: Request) -> Store:
     return request.app.state.store
 
 
+def get_provider_info(request: Request) -> ProviderInfo:
+    return request.app.state.provider_info
+
+
 def build_client(request: Request) -> LLMClient:
     """Build the model client for this request.
 
@@ -103,13 +113,37 @@ def build_client(request: Request) -> LLMClient:
     return request.app.state.client_factory()
 
 
+def _active_provider() -> tuple[str | None, str | None]:
+    """Which provider and model are configured, without building a client.
+
+    `resolve_provider`/`load_config` only read environment variables (see
+    analyst.llm), so this never imports a provider SDK, contacts a provider,
+    or reads an API key's value. (None, None) means nothing is configured.
+    """
+    try:
+        provider = resolve_provider()
+        return provider, load_config(provider=provider).model
+    except LLMConfigurationError:
+        return None, None
+
+
 def _build_router() -> APIRouter:
     router = APIRouter()
 
     @router.get("/health", response_model=HealthResponse, tags=["health"])
-    def health() -> HealthResponse:
-        """Liveness check. Says nothing about configured credentials."""
-        return HealthResponse(status="ok", version=__version__)
+    def health(
+        provider_info: ProviderInfo = Depends(get_provider_info),
+    ) -> HealthResponse:
+        """Liveness check, plus which provider and model are active.
+
+        Reads configuration only (LLM_PROVIDER, MODEL_NAME, GROQ_MODEL_NAME);
+        it never builds a client or contacts a provider, so this stays fast
+        and works even without a key configured.
+        """
+        provider, model = provider_info()
+        return HealthResponse(
+            status="ok", version=__version__, provider=provider, model=model
+        )
 
     @router.post(
         "/datasets",

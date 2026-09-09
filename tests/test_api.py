@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from analyst.api import Store, create_app
 from analyst.errors import LLMConfigurationError, LLMProviderError
+from analyst.llm import LLMConfig
 from conftest import FakeLLM
 from test_agent import GROUP_CALL, clarify, done, tool_call
 
@@ -19,11 +20,16 @@ CSV = "region,revenue\nNorth,100.0\nSouth,50.0\nNorth,110.0\n"
 ANSWER_SCRIPT = (GROUP_CALL, done(), "North leads with 210.")
 
 
-def build(*replies, factory=None):
-    """An app whose model is scripted, plus its client and store."""
+def build(*replies, factory=None, provider_info=None):
+    """An app whose model is scripted, plus its client and store.
+
+    `provider_info` defaults to "nothing configured" rather than the real
+    `_active_provider`, so these tests never depend on this machine's .env.
+    """
     model = FakeLLM(*replies)
     app = create_app(
         client_factory=factory or (lambda: model),
+        provider_info=provider_info or (lambda: (None, None)),
         store=Store(),
         allowed_origins=["http://localhost:8501"],
     )
@@ -54,7 +60,9 @@ def test_health_reports_ok(client):
     response = client.get("/api/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "version": "0.1.0"}
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["version"] == "0.1.0"
 
 
 def test_health_needs_no_provider():
@@ -64,6 +72,81 @@ def test_health_needs_no_provider():
     api, _ = build(factory=explode)
 
     assert api.get("/api/health").status_code == 200
+
+
+def test_health_reports_nothing_configured_by_default(client):
+    body = client.get("/api/health").json()
+
+    assert body["provider"] is None
+    assert body["model"] is None
+
+
+def test_health_reports_the_active_provider_and_model():
+    api, _ = build(*ANSWER_SCRIPT, provider_info=lambda: ("groq", "openai/gpt-oss-120b"))
+
+    body = api.get("/api/health").json()
+
+    assert body["provider"] == "groq"
+    assert body["model"] == "openai/gpt-oss-120b"
+
+
+def test_health_never_builds_a_client_to_report_provider_info():
+    def explode():
+        raise AssertionError("no client should be built for a health check")
+
+    api, _ = build(factory=explode, provider_info=lambda: ("gemini", "gemini-2.5-flash"))
+
+    body = api.get("/api/health").json()
+
+    assert body["provider"] == "gemini"
+    assert body["model"] == "gemini-2.5-flash"
+
+
+def test_health_reflects_a_change_in_provider_info_immediately():
+    """Simulates LLM_PROVIDER changing without a server restart's worth of
+    reasoning: the health check calls provider_info() fresh every request."""
+    current = {"provider": "gemini", "model": "gemini-2.5-flash"}
+    api, _ = build(provider_info=lambda: (current["provider"], current["model"]))
+
+    first = api.get("/api/health").json()
+    current["provider"], current["model"] = "groq", "openai/gpt-oss-120b"
+    second = api.get("/api/health").json()
+
+    assert first["provider"] == "gemini"
+    assert second["provider"] == "groq"
+    assert second["model"] == "openai/gpt-oss-120b"
+
+
+def test_health_response_never_contains_a_key_or_secret():
+    api, _ = build(provider_info=lambda: ("groq", "openai/gpt-oss-120b"))
+
+    text = api.get("/api/health").text
+
+    for leak in ("api_key", "GOOGLE_API_KEY", "GROQ_API_KEY", "AIza", "gsk_"):
+        assert leak not in text
+
+
+def test_default_provider_info_reports_a_configured_provider(monkeypatch):
+    """The default resolver, in isolation from the real environment."""
+    import analyst.api.main as main
+
+    monkeypatch.setattr(main, "resolve_provider", lambda: "groq")
+    monkeypatch.setattr(
+        main, "load_config", lambda provider: LLMConfig(api_key="x", model="m")
+    )
+
+    assert main._active_provider() == ("groq", "m")
+
+
+def test_default_provider_info_reports_nothing_when_unconfigured(monkeypatch):
+    import analyst.api.main as main
+
+    def unconfigured():
+        raise LLMConfigurationError("no key set")
+
+    monkeypatch.setattr(main, "resolve_provider", unconfigured)
+
+    assert main._active_provider() == (None, None)
 
 
 # --------------------------------------------------------------------------
