@@ -68,6 +68,27 @@ Chart builders return a Matplotlib `Figure` and write nothing to disk. Available
 `bar_chart`, `line_chart`, `histogram`, `scatter_plot`, `box_plot` and
 `correlation_heatmap`.
 
+### Asking questions
+
+Set `GOOGLE_API_KEY` in a `.env` file (copy `.env.example`), then let a model
+pick the tool while pandas does the arithmetic.
+
+```python
+from analyst import GeminiClient, answer_question, load_dataset
+
+frame = load_dataset("data/sales.csv")
+answer = answer_question(frame, "Which region earns the most?", GeminiClient())
+
+print(answer.text)       # the reply in plain language
+print(answer.tool)       # which analysis tool ran
+print(answer.evidence)   # the AnalysisResult it was written from
+```
+
+The model never computes values. It chooses one registered tool and its
+arguments; the dispatcher rejects anything else, runs the real Phase 2
+function, and hands the verified result back for wording. There is no code
+execution, and unregistered tools cannot run.
+
 ## Development
 
 ```bash

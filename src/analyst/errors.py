@@ -31,3 +31,31 @@ class ColumnNotFoundError(AnalysisError):
 
 class InvalidOperationError(AnalysisError):
     """The requested operation does not apply to this data."""
+
+
+class LLMError(Exception):
+    """Base class for language-model failures."""
+
+
+class LLMConfigurationError(LLMError):
+    """The model client is missing configuration, such as an API key."""
+
+
+class LLMProviderError(LLMError):
+    """The provider rejected the request or could not be reached."""
+
+
+class LLMResponseError(LLMError):
+    """The model replied with something we could not parse."""
+
+
+class ToolError(Exception):
+    """Base class for tool selection and dispatch failures."""
+
+
+class UnknownToolError(ToolError):
+    """A tool was requested that is not in the registry."""
+
+
+class InvalidToolArgumentsError(ToolError):
+    """A tool was called with missing, unknown or badly typed arguments."""

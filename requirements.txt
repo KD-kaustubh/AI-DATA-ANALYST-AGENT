@@ -2,5 +2,6 @@ pandas
 numpy
 matplotlib
 openpyxl
+google-genai
 python-dotenv
 pytest

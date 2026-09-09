@@ -67,3 +67,40 @@ def analysis_frame() -> pd.DataFrame:
             ),
         }
     )
+
+
+class FakeLLM:
+    """A scripted stand-in for a real model.
+
+    Returns the queued replies in order and records every call, so tests can
+    check what the model was shown without touching a network or an API key.
+    """
+
+    def __init__(self, *replies: str) -> None:
+        self.replies = list(replies)
+        self.calls: list[dict] = []
+
+    def generate(
+        self, prompt: str, *, system: str | None = None, json_output: bool = False
+    ) -> str:
+        self.calls.append(
+            {"prompt": prompt, "system": system, "json_output": json_output}
+        )
+        if not self.replies:
+            raise AssertionError("The model was called more times than expected.")
+        return self.replies.pop(0)
+
+
+class BrokenLLM:
+    """A model that always fails, standing in for a provider outage."""
+
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error or RuntimeError("connection reset")
+
+    def generate(self, prompt: str, *, system=None, json_output: bool = False) -> str:
+        raise self.error
+
+
+@pytest.fixture
+def fake_llm():
+    return FakeLLM
