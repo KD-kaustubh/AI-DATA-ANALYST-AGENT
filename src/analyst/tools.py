@@ -32,7 +32,10 @@ from analyst.errors import InvalidToolArgumentsError, LLMResponseError, UnknownT
 
 CALL_TOOL = "call_tool"
 ANSWER = "answer"
-ACTIONS = (CALL_TOOL, ANSWER)
+CLARIFY = "clarification"
+ACTIONS = (CALL_TOOL, ANSWER, CLARIFY)
+# Actions that carry a message to the user instead of running anything.
+MESSAGE_ACTIONS = (ANSWER, CLARIFY)
 
 # JSON type names mapped to what they may arrive as.
 _TYPES: dict[str, tuple[type, ...]] = {
@@ -89,9 +92,12 @@ class ToolSpec:
 class ToolRequest:
     """What the model decided to do.
 
-    `action` is either "call_tool", with a tool name and arguments, or
-    "answer", carrying a message when no tool is needed or the question
-    cannot be answered from the dataset.
+    `action` is one of:
+    - "call_tool", with a tool name and arguments;
+    - "answer", carrying a message when the evidence is enough or the
+      dataset cannot answer the question;
+    - "clarification", carrying a question to put back to the user when the
+      request is ambiguous.
     """
 
     action: str
@@ -113,11 +119,11 @@ class ToolRequest:
                 f"Expected action to be one of {', '.join(ACTIONS)}, got {action!r}."
             )
 
-        if action == ANSWER:
+        if action in MESSAGE_ACTIONS:
             message = payload.get("message")
             if not isinstance(message, str) or not message.strip():
-                raise LLMResponseError("An 'answer' action needs a message.")
-            return cls(action=ANSWER, message=message.strip())
+                raise LLMResponseError(f"A '{action}' action needs a message.")
+            return cls(action=action, message=message.strip())
 
         tool = payload.get("tool")
         if not isinstance(tool, str) or not tool.strip():

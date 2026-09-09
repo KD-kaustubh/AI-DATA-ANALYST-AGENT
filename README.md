@@ -80,9 +80,31 @@ frame = load_dataset("data/sales.csv")
 answer = answer_question(frame, "Which region earns the most?", create_client())
 
 print(answer.text)       # the reply in plain language
-print(answer.tool)       # which analysis tool ran
-print(answer.evidence)   # the AnalysisResult it was written from
+print(answer.kind)       # answer, clarification or incomplete
+print(answer.steps)      # every tool call, with its verified result
+print(answer.grounding)  # which figures were traced back to the evidence
 ```
+
+The agent works one step at a time: it picks a tool, sees the verified result,
+and may call another before answering. It runs at most `max_steps` tools
+(default 5) and then stops with `kind="incomplete"`, so a question can never
+loop. A failed step is handed back so the model can fix its arguments; a
+provider outage is raised.
+
+### Conversations
+
+```python
+from analyst import Conversation, create_client, load_dataset
+
+session = Conversation(load_dataset("data/sales.csv"), create_client())
+session.ask("What is the average revenue by category?")
+session.ask("Which one is highest?")     # read against the previous turn
+```
+
+State is in memory only. The model sees the last few turns, and only the
+newest keeps its result rows, so the prompt cannot grow with the conversation.
+When a follow-up is ambiguous the agent returns `kind="clarification"` with a
+question rather than guessing.
 
 Gemini and Groq are interchangeable. `create_client()` reads `LLM_PROVIDER`
 when set, otherwise it uses whichever key is configured, preferring Gemini if

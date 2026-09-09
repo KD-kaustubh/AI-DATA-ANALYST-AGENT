@@ -14,6 +14,12 @@ from analyst.analysis import (
     sort_rows,
     value_counts,
 )
+from analyst.agent import (
+    DEFAULT_MAX_STEPS,
+    Answer,
+    EvidenceStep,
+    answer_question,
+)
 from analyst.charts import (
     bar_chart,
     box_plot,
@@ -24,6 +30,7 @@ from analyst.charts import (
     scatter_plot,
 )
 from analyst.context import ColumnSummary, DatasetContext, build_context
+from analyst.conversation import DEFAULT_HISTORY_TURNS, Conversation, Turn
 from analyst.errors import (
     AnalysisError,
     ColumnNotFoundError,
@@ -42,6 +49,7 @@ from analyst.errors import (
     UnsupportedFileTypeError,
 )
 from analyst.gemini import GeminiClient
+from analyst.grounding import GroundingReport, check_grounding
 from analyst.groq import GroqClient
 from analyst.llm import (
     DEFAULT_GROQ_MODEL,
@@ -64,9 +72,9 @@ from analyst.profiling import (
     NumericStats,
     profile_dataset,
 )
-from analyst.questions import Answer, answer_question
 from analyst.tools import (
     ACTIONS,
+    CLARIFY,
     TOOLS,
     ToolRequest,
     ToolSpec,
@@ -85,12 +93,16 @@ __all__ = [
     "AnalysisError",
     "AnalysisResult",
     "Answer",
+    "CLARIFY",
     "CategoricalStats",
     "ColumnNotFoundError",
     "ColumnProfile",
     "ColumnSummary",
     "Condition",
+    "Conversation",
     "DEFAULT_GROQ_MODEL",
+    "DEFAULT_HISTORY_TURNS",
+    "DEFAULT_MAX_STEPS",
     "DEFAULT_MODEL",
     "DatasetContext",
     "DatasetError",
@@ -99,8 +111,10 @@ __all__ = [
     "DatasetReadError",
     "DatetimeColumn",
     "EmptyDatasetError",
+    "EvidenceStep",
     "GeminiClient",
     "GroqClient",
+    "GroundingReport",
     "InvalidOperationError",
     "InvalidToolArgumentsError",
     "LLMClient",
@@ -119,12 +133,14 @@ __all__ = [
     "ToolError",
     "ToolRequest",
     "ToolSpec",
+    "Turn",
     "UnknownToolError",
     "UnsupportedFileTypeError",
     "answer_question",
     "bar_chart",
     "box_plot",
     "build_context",
+    "check_grounding",
     "correlation",
     "correlation_heatmap",
     "create_client",

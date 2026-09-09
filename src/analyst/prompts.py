@@ -1,4 +1,4 @@
-"""The two prompts used in the question-answering flow.
+"""The prompts used by the agent.
 
 They are kept here, short and readable, rather than spread through the code
 that calls the model. The rules say what the model may do; the application
@@ -12,63 +12,102 @@ from typing import Any
 
 from analyst.context import DatasetContext
 
-# Rows of evidence sent back for the final answer. Enough to explain a
-# result, small enough to keep the prompt cheap.
+# Rows of evidence sent to the model. Enough to explain a result, small
+# enough to keep the prompt cheap.
 MAX_EVIDENCE_ROWS = 50
 
-TOOL_SELECTION_RULES = """You choose which analysis tool answers a question about one dataset.
+# How the model is told to ask for something it cannot decide alone. Kept
+# separate so the wording can be tuned without touching the other rules.
+CLARIFICATION_RULES = """- When the question is ambiguous, use "clarification" and ask one short question.
+  Ambiguous means: a column, filter, measure or time range you would have to guess.
+  Never guess an interpretation and never invent a filter the user did not ask for."""
+
+AGENT_RULES = f"""You plan one step at a time for a data analysis tool.
 
 Rules:
 - Every number must come from a tool. Never calculate, estimate or guess a value yourself.
 - Use only the columns listed in the dataset schema. Never invent a column name.
 - Request only tools from the supplied list, with the arguments they declare.
 - You cannot write or run code. Tools are the only way to touch the data.
-- If the dataset cannot answer the question, or no tool fits, use the "answer" action to say so plainly.
+- Call one tool at a time. You will be shown its result and may then call another.
+- When the evidence already answers the question, use "answer".
+{CLARIFICATION_RULES}
+- When the dataset or the available tools cannot answer the question, use "answer" and
+  say plainly what is missing. Never pretend an analysis ran.
+- If a step failed, read the error and either fix the arguments or explain the problem.
+- Earlier questions and results in this conversation may be used to read a follow-up,
+  but any new number still has to come from a tool.
 
-Reply with a single JSON object and nothing else, in one of these two shapes:
+Reply with a single JSON object and nothing else, in one of these three shapes:
 
-{"action": "call_tool", "tool": "<tool name>", "arguments": {<arguments>}}
-{"action": "answer", "message": "<why no tool was used>"}"""
+{{"action": "call_tool", "tool": "<tool name>", "arguments": {{<arguments>}}}}
+{{"action": "answer", "message": "<what the evidence shows>"}}
+{{"action": "clarification", "message": "<the one question you need answered>"}}"""
 
-ANSWER_RULES = """You explain the result of a data analysis in plain language.
+ANSWER_RULES = """You write the final answer to a data analysis question.
 
 Rules:
-- Use only the numbers in the supplied result. Never add, adjust or infer a value.
-- If the result does not answer the question, say what it does show instead.
-- Answer in one short paragraph. Do not repeat the raw result or mention tools, JSON or column dtypes.
+- Every number you state must appear in the verified evidence. Never add, adjust,
+  combine or infer a value, and never do arithmetic the evidence does not already show.
+- If the evidence does not answer the question, say plainly what is missing.
+- Never claim an analysis ran unless it is in the evidence.
+- Keep dataset facts separate from any general explanation you add.
+- Answer in one short paragraph. Do not mention tools, JSON, dtypes or this prompt.
 - Round only for readability, and never change a value's meaning."""
 
 
-def build_tool_prompt(
-    question: str, context: DatasetContext, tools: list[dict[str, Any]]
+def build_agent_prompt(
+    question: str,
+    context: DatasetContext,
+    tools: list[dict[str, Any]],
+    steps: list[dict[str, Any]] | None = None,
+    history: list[dict[str, Any]] | None = None,
 ) -> str:
-    """Ask the model which tool to run."""
-    return "\n\n".join(
-        [
-            "Dataset schema:",
-            context.to_prompt_text(),
-            "Available tools:",
-            json.dumps(tools, indent=2),
-            f"Question: {question}",
-            "Reply with the JSON object for the tool that answers it.",
+    """Ask the model what to do next, given what has been established."""
+    sections = ["Dataset schema:", context.to_prompt_text()]
+
+    if history:
+        sections += ["Earlier in this conversation:", _dump(history)]
+
+    sections += ["Available tools:", _dump(tools)]
+
+    if steps:
+        sections += [
+            "Steps already taken for this question:",
+            _dump(steps),
         ]
-    )
+    else:
+        sections.append("No steps have been taken for this question yet.")
+
+    sections += [
+        f"Question: {question}",
+        "Reply with the JSON object for your next action.",
+    ]
+    return "\n\n".join(sections)
 
 
-def build_answer_prompt(question: str, result: dict[str, Any]) -> str:
-    """Ask the model to put a verified result into words."""
-    return "\n\n".join(
-        [
-            f"Question: {question}",
-            "Verified result computed from the dataset:",
-            json.dumps(_trim_rows(result), indent=2, default=str),
-            "Answer the question using only these numbers.",
-        ]
-    )
+def build_answer_prompt(
+    question: str,
+    context: DatasetContext,
+    evidence: list[dict[str, Any]],
+    history: list[dict[str, Any]] | None = None,
+) -> str:
+    """Ask the model to put the verified evidence into words."""
+    sections = [f"Question: {question}", "Dataset schema:", context.to_prompt_text()]
+
+    if history:
+        sections += ["Earlier in this conversation:", _dump(history)]
+
+    sections += [
+        "Verified results computed from the dataset:",
+        _dump(evidence),
+        "Answer the question using only these numbers.",
+    ]
+    return "\n\n".join(sections)
 
 
-def _trim_rows(result: dict[str, Any]) -> dict[str, Any]:
-    """Cap the rows sent to the model, noting when some were left out."""
+def trim_result(result: dict[str, Any]) -> dict[str, Any]:
+    """Cap the rows carried in a result, noting when some were left out."""
     rows = result.get("rows") or []
     if len(rows) <= MAX_EVIDENCE_ROWS:
         return result
@@ -77,3 +116,7 @@ def _trim_rows(result: dict[str, Any]) -> dict[str, Any]:
     trimmed["rows"] = rows[:MAX_EVIDENCE_ROWS]
     trimmed["rows_omitted"] = len(rows) - MAX_EVIDENCE_ROWS
     return trimmed
+
+
+def _dump(payload: Any) -> str:
+    return json.dumps(payload, indent=2, default=str)

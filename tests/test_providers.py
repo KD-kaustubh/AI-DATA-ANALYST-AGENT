@@ -45,7 +45,9 @@ class FakeCompletions:
         self.calls.append(settings)
         if self.error:
             raise self.error
-        message = type("Message", (), {"content": self.reply})()
+        # A list of replies is consumed in order; a single one repeats.
+        reply = self.reply.pop(0) if isinstance(self.reply, list) else self.reply
+        message = type("Message", (), {"content": reply})()
         choice = type("Choice", (), {"message": message})()
         return type("Completion", (), {"choices": [choice]})()
 
@@ -300,18 +302,23 @@ def test_the_two_clients_are_interchangeable_in_the_question_flow(
     from analyst import answer_question
 
     install_fake_groq(
-        reply=json.dumps(
-            {
-                "action": "call_tool",
-                "tool": "value_counts",
-                "arguments": {"column": "region"},
-            }
-        )
+        reply=[
+            json.dumps(
+                {
+                    "action": "call_tool",
+                    "tool": "value_counts",
+                    "arguments": {"column": "region"},
+                }
+            ),
+            json.dumps({"action": "answer", "message": "Counted."}),
+            "North appears three times.",
+        ]
     )
     answer = answer_question(analysis_frame, "How many per region?", GroqClient(GROQ_CONFIG))
 
     assert answer.tool == "value_counts"
     assert answer.evidence["rows"][0]["count"] == 3
+    assert answer.text == "North appears three times."
 
 
 @pytest.mark.parametrize("provider", ["gemini", "groq"])
