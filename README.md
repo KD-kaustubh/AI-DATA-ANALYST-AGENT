@@ -1,14 +1,29 @@
 # AI Data Analyst Agent
 
-Ask a dataset questions in plain English and get answers backed by real
-computation, not a language model's guess. Upload a CSV or XLSX, and a
-bounded agent picks from a fixed set of pandas operations, runs the one
-that fits, and explains the verified result — with follow-up questions
-handled in a running conversation.
+An AI-powered data analyst you can talk to: upload a CSV or XLSX dataset,
+ask questions about it in plain English, and get answers backed by real
+computation, not a language model's guess. A bounded agent picks from a
+fixed set of pandas operations, runs the one that fits, and explains the
+verified result — with follow-up questions handled in a running
+conversation.
 
-**Status:** working end to end — library, HTTP API, web UI, and Docker
-setup all run locally and have been verified through a real provider call.
-342 automated tests, 0 known failures.
+**🔗 Live Demo:** **[ai-data-analyst-ui-tfvu.onrender.com](https://ai-data-analyst-ui-tfvu.onrender.com)**
+
+| Link | URL |
+| --- | --- |
+| UI (start here) | <https://ai-data-analyst-ui-tfvu.onrender.com> |
+| API | <https://ai-data-analyst-api-8b3n.onrender.com> |
+| API health | <https://ai-data-analyst-api-8b3n.onrender.com/api/health> |
+
+The API and UI are deployed as two separate services on Render, in the same
+containers used locally (`Dockerfile.api` / `Dockerfile.ui`). The free tier
+sleeps after inactivity, so the first request after a while can take a few
+seconds to wake up.
+
+**Status:** deployed and verified end to end — dataset upload, profiling,
+natural-language analysis, follow-up questions, and grounded answers have
+all been exercised against the live app running on Groq
+(`openai/gpt-oss-120b`). 342 automated tests, 0 known failures.
 
 ## The problem this solves
 
@@ -23,22 +38,27 @@ answer that doesn't trace back to a verified result.
 
 ## Features
 
-- Upload a CSV or XLSX and get an immediate structured profile (row/column
-  counts, dtypes, missing values, duplicates, detected date columns)
-- Ask questions in natural language; the agent runs one or more of seven
-  deterministic analysis operations to answer them
-- Multi-step reasoning with a hard cap (max 5 tool calls per question), so
-  a confused model can't loop forever
-- Follow-up questions in a running conversation ("...and which one is
-  highest?") using bounded, non-growing history
+- CSV/XLSX upload with an immediate structured profile (row/column counts,
+  dtypes, missing values, duplicates, detected date columns)
+- Natural-language questions, answered through structured LLM tool calling
+  — the model requests one of seven deterministic pandas operations, never
+  writes or runs code itself
+- Multi-step agent reasoning with a hard cap (max 5 tool calls per
+  question), so a confused model can't loop forever
+- Conversation / follow-up questions ("...and which one is highest?")
+  using bounded, non-growing history
 - The agent asks for clarification instead of guessing when a question is
   genuinely ambiguous
-- A grounding check on every answer, flagging any number that doesn't
-  appear in the computed evidence
-- Interchangeable LLM providers (Gemini or Groq) behind one interface —
-  switching is one environment variable
-- A REST API and a Streamlit UI, both containerized, both talking over
-  plain HTTP with no shared process state
+- Evidence tracking and grounding validation on every answer, flagging any
+  number that doesn't appear in the computed evidence
+- Charts and visualizations (bar, line, histogram, scatter, box,
+  correlation heatmap) available as a library
+- Gemini and Groq provider support behind one interface — switching is one
+  environment variable
+- A safe, explicit tool registry: the model can only select from a fixed
+  list, and no arbitrary Python execution is possible anywhere in the path
+- FastAPI backend, Streamlit frontend, both containerized with Docker and
+  deployed on Render as separate services
 
 ## Architecture
 
@@ -80,6 +100,12 @@ the name up in a fixed registry and rejects anything else — there is no
 `eval`, no `exec`, no dynamic import driven by model output, anywhere in
 this path.
 
+**In production:** Streamlit + FastAPI are each deployed to Render as a
+separate Docker web service; the LLM provider is Groq
+(`openai/gpt-oss-120b`). Locally, the same two containers run through
+`docker compose`, and either Gemini or Groq can be selected with one
+environment variable.
+
 | Layer | Module | Role |
 |---|---|---|
 | Loading | `analyst.loader` | CSV/XLSX in, validated DataFrame out |
@@ -101,7 +127,7 @@ this path.
 | Language | Python 3.12 |
 | Data | pandas, numpy |
 | Charts | Matplotlib |
-| LLM providers | Google Gemini (`google-genai`), Groq |
+| LLM providers | Google Gemini (`google-genai` SDK), Groq (`groq` SDK) |
 | API | FastAPI + Uvicorn |
 | UI | Streamlit |
 | Validation | Pydantic |
@@ -160,16 +186,20 @@ operations; the model can only select from this fixed list.
 
 ## LLM provider configuration
 
-Gemini and Groq sit behind one `LLMClient` interface. `create_client()`
-picks a provider: `LLM_PROVIDER` if set, otherwise whichever API key is
-present (Gemini wins if both are). Verified live against:
+Both Gemini and Groq are supported behind one `LLMClient` interface.
+`create_client()` picks a provider: `LLM_PROVIDER` if set, otherwise
+whichever API key is present (Gemini wins if both are).
 
-- **Groq** — `openai/gpt-oss-120b` (the provider used for end-to-end testing)
-- **Gemini** — `gemini-2.5-flash` (unit-tested against a stubbed SDK; not
-  re-verified against the live API in this pass)
+- **Currently deployed:** Groq, model `openai/gpt-oss-120b` — this is what
+  `/api/health` on the live deployment reports, and what the live demo runs
+  on.
+- **Gemini** (`gemini-2.5-flash` by default) is fully implemented and
+  unit-tested against a stubbed SDK; it works locally with a
+  `GOOGLE_API_KEY` but is not the provider currently deployed.
 
-Adding a third provider means one class implementing `generate()` plus one
-entry in `PROVIDER_SETTINGS` — no other code changes.
+Switching provider is one environment variable (`LLM_PROVIDER=gemini` or
+`groq`), no code change. Adding a third provider means one class
+implementing `generate()` plus one entry in `PROVIDER_SETTINGS`.
 
 ## Local setup
 
@@ -247,32 +277,38 @@ persistent volume.
 
 ## Deployment
 
-The project deploys as-is to [Render](https://render.com) using the
-included `render.yaml` Blueprint — two Docker web services, the same
-`Dockerfile.api`/`Dockerfile.ui` used locally, no code changes. Render's
-free web-service tier is Docker-native and needs no CLI.
+**Live now** on [Render](https://render.com), deployed as two separate
+Docker web services from the same `Dockerfile.api` / `Dockerfile.ui` used
+locally — no code written specifically for deployment, beyond honoring a
+platform-provided `$PORT`:
 
-1. Push this repository to GitHub (it already is).
+- UI: https://ai-data-analyst-ui-tfvu.onrender.com
+- API: https://ai-data-analyst-api-8b3n.onrender.com
+
+The API and UI are independent services with no shared process or disk —
+the UI reaches the API over plain HTTPS via `ANALYST_API_URL`, the same way
+it reaches `http://api:8000` inside Docker Compose.
+
+To redeploy this repository to your own Render account, using the included
+`render.yaml` Blueprint:
+
+1. Fork or push this repository to your own GitHub.
 2. On Render: **New +** → **Blueprint**, select the repository. Render
    reads `render.yaml` and creates both services.
-3. Open the `ai-data-analyst-api` service → **Environment**, and set
-   `LLM_PROVIDER` plus one provider key (`GROQ_API_KEY` or
-   `GOOGLE_API_KEY`). These are entered in Render's dashboard, never
-   committed — `render.yaml` marks them `sync: false` for exactly this
-   reason.
-4. Once the API service has deployed, copy its URL (something like
-   `https://ai-data-analyst-api.onrender.com`).
-5. Open the `ai-data-analyst-ui` service → **Environment**, set
-   `ANALYST_API_URL` to that URL, and redeploy.
-
-Both `Dockerfile.api` and `Dockerfile.ui` read a platform-provided `$PORT`
-if one is set (falling back to 8000/8501 for local Docker use), which is
-what Render — and most similar platforms — require.
+3. Open the api service → **Environment**, and set `LLM_PROVIDER` plus one
+   provider key (`GROQ_API_KEY` or `GOOGLE_API_KEY`). These are entered in
+   Render's dashboard, never committed — `render.yaml` marks them
+   `sync: false` for exactly this reason.
+4. Once the api service has deployed, copy its URL.
+5. Open the ui service → **Environment**, set `ANALYST_API_URL` to that
+   URL, and redeploy.
 
 This is intentionally the simplest deployment that fits: no Kubernetes, no
-Terraform, no CI/CD pipeline, no reverse proxy. Two containers, one env var
-connecting them, matching the architecture used everywhere else in this
-project.
+Terraform, no CI/CD pipeline, no reverse proxy, no database. Two
+containers, one env var connecting them, matching the architecture used
+everywhere else in this project. The trade-off of Render's free tier: both
+services idle-sleep after inactivity and take a few seconds to wake on the
+next request.
 
 ## Environment variables
 
@@ -322,8 +358,8 @@ server restarts.** There is no database and nothing is written to disk.
 
 ## Example questions
 
-Tried against a small employee dataset (`id, name, age, department, salary,
-country`) through the actual running stack:
+Verified against a small employee dataset (`id, name, age, department,
+salary, country`) on the **live deployment**:
 
 - "What is the average salary?" → one `describe_numeric` call
 - "What is the average salary by department?" → one `group_aggregate` call
@@ -331,6 +367,13 @@ country`) through the actual running stack:
   follow-up, reusing the previous answer's evidence rather than
   re-running an identical query
 - "How many employees are in each department?" → one `value_counts` call
+
+A few more that the same tools support, not re-run in this pass:
+
+- "Show the distribution of the department column." → `value_counts`
+- "What is the correlation between salary and age?" → `correlation`
+- "How has revenue changed over time?" (on a dataset with a date column)
+  → `group_by_period`
 
 ## Library usage
 
